@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Family Hub"/>
+<link rel="manifest" href="manifest.json"/>
+<link rel="apple-touch-icon" href="icon.png"/>
+<title>Family Hub</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  body{background:#0a0a0f;font-family:-apple-system,'SF Pro Display',sans-serif;color:#e2e8f0;overscroll-behavior:none;}
+  textarea,input{font-family:inherit;color:#e2e8f0;}
+  textarea:focus,input:focus{outline:none;}
+  ::-webkit-scrollbar{display:none;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useReducer,useRef} = React;
+
+const FAMILY=["Me","Partner","Kid"];
+const DAYS=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const STAR="★",EMPTYSTAR="☆";
+
+const T={
+  bg:"#0a0a0f",surface:"#13131a",surface2:"#1c1c26",border:"#2a2a38",
+  accent:"#e2e8f0",gold:"#c9a84c",green:"#4a9e7a",
+  text:"#e2e8f0",textSoft:"#94a3b8",textDim:"#4a4a6a",
+};
+
+const defaultRecipes={
+  "Spaghetti Bolognese":{ingredients:["spaghetti","ground beef","tomato sauce","onion","garlic"],notes:"Classic family fave",ratings:{Me:5,Partner:4}},
+  "Tacos":{ingredients:["taco shells","ground beef","salsa","cheese","lettuce"],notes:"",ratings:{Me:5,Partner:5}},
+  "Chicken Stir Fry":{ingredients:["chicken breast","broccoli","soy sauce","bell pepper","rice"],notes:"Quick weeknight meal",ratings:{Me:4,Partner:3}},
+  "Pizza Night":{ingredients:["pizza dough","tomato sauce","mozzarella","toppings"],notes:"Everyone picks toppings!",ratings:{Me:5,Kid:5}},
+  "BBQ Burgers":{ingredients:["burger patties","buns","lettuce","tomato","cheese"],notes:"",ratings:{}},
+  "Roast Chicken":{ingredients:["whole chicken","potatoes","carrots","rosemary","garlic"],notes:"Sunday tradition",ratings:{Partner:5}},
+};
+const defaultMeals={
+  Monday:{lunch:"",dinner:"Spaghetti Bolognese"},Tuesday:{lunch:"",dinner:"Tacos"},
+  Wednesday:{lunch:"Caesar Salad",dinner:""},Thursday:{lunch:"",dinner:"Chicken Stir Fry"},
+  Friday:{lunch:"",dinner:"Pizza Night"},Saturday:{lunch:"Sandwiches",dinner:"BBQ Burgers"},
+  Sunday:{lunch:"",dinner:"Roast Chicken"},
+};
+const defaultJournal=[
+  {id:1,date:"2026-03-08",meal:"Spaghetti Bolognese",author:"Me",note:"Kids demolished it. Double the recipe next time!",rating:5},
+  {id:2,date:"2026-03-06",meal:"Pizza Night",author:"Partner",note:"Saturday night bliss 🍕",rating:5},
+];
+
+function loadState(){
+  try{const s=localStorage.getItem("familyhub_v3");if(s)return JSON.parse(s);}catch(e){}
+  return{tab:"planner",profile:"Me",meals:defaultMeals,recipes:defaultRecipes,shopping:[],journal:defaultJournal};
+}
+function persist(state){try{localStorage.setItem("familyhub_v3",JSON.stringify(state));}catch(e){}}
+
+function reducer(state,action){
+  let next=state;
+  switch(action.type){
+    case"SET_TAB":next={...state,tab:action.tab};break;
+    case"SET_PROFILE":next={...state,profile:action.profile};break;
+    case"SET_MEAL":next={...state,meals:{...state.meals,[action.day]:{...state.meals[action.day],[action.slot]:action.value}}};break;
+    case"SET_RECIPE_NOTE":{const r=state.recipes[action.meal]||{ingredients:[],ratings:{}};next={...state,recipes:{...state.recipes,[action.meal]:{...r,notes:action.value}}};break;}
+    case"SET_RECIPE_INGREDIENTS":{const r=state.recipes[action.meal]||{notes:"",ratings:{}};next={...state,recipes:{...state.recipes,[action.meal]:{...r,ingredients:action.value}}};break;}
+    case"RATE_MEAL":{const r=state.recipes[action.meal]||{ingredients:[],notes:"",ratings:{}};next={...state,recipes:{...state.recipes,[action.meal]:{...r,ratings:{...r.ratings,[action.profile]:action.stars}}}};break;}
+    case"GEN_SHOPPING":{
+      const seen={},items=[];
+      DAYS.forEach(d=>["lunch","dinner"].forEach(slot=>{
+        const m=state.meals[d][slot];
+        if(m&&state.recipes[m])state.recipes[m].ingredients.forEach(i=>{if(!seen[i]){seen[i]=true;items.push({id:items.length,name:i,checked:false});}});
+      }));
+      next={...state,shopping:items,tab:"shopping"};break;
+    }
+    case"TOGGLE_SHOP":next={...state,shopping:state.shopping.map(i=>i.id===action.id?{...i,checked:!i.checked}:i)};break;
+    case"ADD_JOURNAL":next={...state,journal:[{...action.entry,id:Date.now()},...state.journal]};break;
+    case"ADD_RECIPE":next={...state,recipes:{...state.recipes,[action.name]:{ingredients:action.ingredients||[],notes:action.notes||"",ratings:{}}}};break;
+    default:return state;
+  }
+  persist(next);return next;
+}
+
+function StarRating({value,onChange,readonly,size=16}){
+  return(
+    <span style={{cursor:readonly?"default":"pointer",color:T.gold,fontSize:size,letterSpacing:2}}>
+      {[1,2,3,4,5].map(s=><span key={s} onClick={()=>!readonly&&onChange(s)}>{s<=(value||0)?STAR:EMPTYSTAR}</span>)}
+    </span>
+  );
+}
+function Divider(){return<div style={{height:1,background:T.border,margin:"12px 0"}}/>;}
+function Card({children,style={}}){return<div style={{background:T.surface,borderRadius:16,padding:16,marginBottom:12,border:`1px solid ${T.border}`,...style}}>{children}</div>;}
+function SectionTitle({children}){return<div style={{fontSize:11,fontWeight:700,color:T.textDim,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10}}>{children}</div>;}
+
+function RandomPicker({recipes}){
+  const [picked,setPicked]=useState(null);
+  const [spinning,setSpinning]=useState(false);
+  const names=Object.keys(recipes);
+  const spin=()=>{
+    setSpinning(true);setPicked(null);
+    let i=0,iv=setInterval(()=>{
+      setPicked(names[Math.floor(Math.random()*names.length)]);i++;
+      if(i>20){clearInterval(iv);setSpinning(false);}
+    },75);
+  };
+  return(
+    <Card style={{marginBottom:16}}>
+      <SectionTitle>Tonight's Picker</SectionTitle>
+      <div style={{fontSize:picked?18:13,fontWeight:picked?700:400,color:picked?T.text:T.textDim,minHeight:28,marginBottom:14}}>
+        {picked||"Spin to pick tonight's dinner"}
+      </div>
+      <button onClick={spin} disabled={spinning} style={{background:T.accent,color:T.bg,border:"none",borderRadius:12,padding:"10px 24px",fontWeight:700,fontSize:14,cursor:spinning?"default":"pointer",opacity:spinning?0.6:1,width:"100%"}}>
+        {spinning?"Picking…":"🎲 Spin"}
+      </button>
+    </Card>
+  );
+}
+
+function UploadRecipeCard({onSave}){
+  const [img,setImg]=useState(null);
+  const [imgData,setImgData]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [result,setResult]=useState(null);
+  const [error,setError]=useState(null);
+  const fileRef=useRef();
+
+  const handleFile=e=>{
+    const file=e.target.files[0];if(!file)return;
+    setResult(null);setError(null);
+    const reader=new FileReader();
+    reader.onload=ev=>{setImg(ev.target.result);setImgData(ev.target.result.split(",")[1]);};
+    reader.readAsDataURL(file);
+  };
+
+  const analyze=async()=>{
+    if(!imgData)return;
+    setLoading(true);setError(null);setResult(null);
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
+          messages:[{role:"user",content:[
+            {type:"image",source:{type:"base64",media_type:"image/jpeg",data:imgData}},
+            {type:"text",text:`Extract the recipe from this image. Return ONLY raw JSON, no markdown, no backticks: {"name":"recipe name","ingredients":["item1","item2"],"notes":"brief cooking notes"}`}
+          ]}]})
+      });
+      const data=await res.json();
+      const text=data.content.map(b=>b.text||"").join("");
+      setResult(JSON.parse(text.replace(/```json|```/g,"").trim()));
+    }catch(e){setError("Couldn't read this image. Try a clearer photo.");}
+    setLoading(false);
+  };
+
+  return(
+    <Card style={{border:`1px dashed ${T.border}`,marginBottom:16}}>
+      <SectionTitle>Import from Photo</SectionTitle>
+      <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{display:"none"}}/>
+      <button onClick={()=>fileRef.current.click()} style={{background:"transparent",color:T.textSoft,border:`1px solid ${T.border}`,borderRadius:10,padding:"9px 16px",fontWeight:600,cursor:"pointer",fontSize:13,width:"100%"}}>
+        📷 Choose Photo
+      </button>
+      {img&&(
+        <div style={{marginTop:12}}>
+          <img src={img} alt="recipe" style={{width:"100%",borderRadius:10,marginBottom:10,maxHeight:180,objectFit:"cover",opacity:0.85}}/>
+          <button onClick={analyze} disabled={loading} style={{background:T.accent,color:T.bg,border:"none",borderRadius:10,padding:"9px 0",fontWeight:700,cursor:loading?"default":"pointer",opacity:loading?0.6:1,width:"100%",fontSize:13}}>
+            {loading?"Reading recipe…":"✨ Extract Recipe"}
+          </button>
+        </div>
+      )}
+      {error&&<div style={{color:"#e07070",fontSize:13,marginTop:8}}>{error}</div>}
+      {result&&(
+        <div style={{marginTop:12,background:T.surface2,borderRadius:10,padding:14}}>
+          <div style={{fontWeight:700,fontSize:15,color:T.text,marginBottom:6}}>{result.name}</div>
+          <div style={{fontSize:12,color:T.textDim,marginBottom:4,letterSpacing:1,textTransform:"uppercase"}}>Ingredients</div>
+          <div style={{fontSize:13,color:T.textSoft,marginBottom:8,lineHeight:1.6}}>{(result.ingredients||[]).join(", ")}</div>
+          {result.notes&&<div style={{fontSize:13,color:T.textDim,fontStyle:"italic",marginBottom:10}}>{result.notes}</div>}
+          <button onClick={()=>{onSave(result);setResult(null);setImg(null);setImgData(null);}} style={{background:T.green,color:"#fff",border:"none",borderRadius:10,padding:"9px 0",fontWeight:700,cursor:"pointer",width:"100%",fontSize:13}}>
+            Save to Recipes
+          </button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function App(){
+  const [s,dispatch]=useReducer(reducer,null,loadState);
+  const [editCell,setEditCell]=useState(null);
+  const [newJournal,setNewJournal]=useState({meal:"",note:"",rating:0,date:new Date().toISOString().split("T")[0]});
+  const [showJournalForm,setShowJournalForm]=useState(false);
+  const [selectedMeal,setSelectedMeal]=useState(null);
+  const [newRecipeName,setNewRecipeName]=useState("");
+
+  const avgRating=meal=>{
+    const vals=Object.values(s.recipes[meal]?.ratings||{});
+    return vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1):null;
+  };
+
+  const inputStyle={width:"100%",background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 12px",fontSize:14,color:T.text,boxSizing:"border-box"};
+  const btnPrimary={background:T.accent,color:T.bg,border:"none",borderRadius:12,padding:"11px 0",fontWeight:700,cursor:"pointer",width:"100%",fontSize:14};
+  const TABS=[["planner","📅","Plan"],["recipes","🍽","Recipes"],["shopping","🛒","Shop"],["journal","📖","Journal"]];
+
+  return(
+    <div style={{minHeight:"100vh",background:T.bg,color:T.text,maxWidth:430,margin:"0 auto",position:"relative",paddingBottom:90}}>
+      <div style={{height:"env(safe-area-inset-top, 44px)",background:T.surface}}/>
+      <div style={{background:T.surface,borderBottom:`1px solid ${T.border}`,padding:"14px 20px 16px",position:"sticky",top:0,zIndex:50}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:20,fontWeight:800,letterSpacing:-0.5}}>Family Hub</div>
+            <div style={{fontSize:12,color:T.textDim,marginTop:1}}>Meals · Planning · Memories</div>
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            {FAMILY.map(m=>(
+              <button key={m} onClick={()=>dispatch({type:"SET_PROFILE",profile:m})} style={{padding:"5px 10px",borderRadius:20,border:`1px solid ${s.profile===m?T.accent:T.border}`,background:s.profile===m?T.accent:"transparent",color:s.profile===m?T.bg:T.textSoft,fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{padding:"16px 16px 0"}}>
+
+        {s.tab==="planner"&&(
+          <div>
+            <RandomPicker recipes={s.recipes}/>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <SectionTitle>This Week</SectionTitle>
+              <button onClick={()=>dispatch({type:"GEN_SHOPPING"})} style={{background:"transparent",border:`1px solid ${T.border}`,color:T.textSoft,borderRadius:10,padding:"6px 12px",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                🛒 To Shopping
+              </button>
+            </div>
+            {DAYS.map(day=>(
+              <Card key={day}>
+                <div style={{fontWeight:700,fontSize:14,marginBottom:10}}>{day}</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  {["lunch","dinner"].map(slot=>{
+                    const val=s.meals[day][slot];
+                    const isEdit=editCell?.day===day&&editCell?.slot===slot;
+                    return(
+                      <div key={slot} style={{background:T.surface2,borderRadius:10,padding:10,minHeight:58}}>
+                        <div style={{fontSize:10,color:T.textDim,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:5}}>{slot}</div>
+                        {isEdit?(
+                          <input autoFocus value={val} onChange={e=>dispatch({type:"SET_MEAL",day,slot,value:e.target.value})}
+                            onBlur={()=>setEditCell(null)}
+                            style={{...inputStyle,padding:"4px 8px",fontSize:13,borderRadius:8}}/>
+                        ):(
+                          <div onClick={()=>setEditCell({day,slot})} style={{fontSize:13,color:val?T.text:T.textDim,cursor:"pointer",lineHeight:1.4}}>
+                            {val||<span style={{fontStyle:"italic"}}>+ Add</span>}
+                          </div>
+                        )}
+                        {val&&avgRating(val)&&<div style={{fontSize:11,color:T.gold,marginTop:4}}>{STAR} {avgRating(val)}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {s.tab==="recipes"&&(
+          <div>
+            <UploadRecipeCard onSave={r=>{dispatch({type:"ADD_RECIPE",name:r.name,ingredients:r.ingredients,notes:r.notes});setSelectedMeal(r.name);}}/>
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              <input placeholder="New recipe name…" value={newRecipeName} onChange={e=>setNewRecipeName(e.target.value)} style={{...inputStyle,flex:1}}/>
+              <button onClick={()=>{if(newRecipeName.trim()){dispatch({type:"ADD_RECIPE",name:newRecipeName.trim()});setSelectedMeal(newRecipeName.trim());setNewRecipeName("");}}} style={{background:T.accent,color:T.bg,border:"none",borderRadius:10,padding:"0 16px",fontWeight:700,cursor:"pointer",fontSize:13,whiteSpace:"nowrap"}}>
+                Add
+              </button>
+            </div>
+            {Object.keys(s.recipes).map(meal=>{
+              const rec=s.recipes[meal];const open=selectedMeal===meal;
+              return(
+                <Card key={meal}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setSelectedMeal(open?null:meal)}>
+                    <div style={{fontWeight:600,fontSize:15}}>{meal}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      {avgRating(meal)&&<span style={{color:T.gold,fontSize:13,fontWeight:700}}>{STAR} {avgRating(meal)}</span>}
+                      <span style={{color:T.textDim,fontSize:16}}>{open?"▲":"▼"}</span>
+                    </div>
+                  </div>
+                  {open&&(
+                    <div style={{marginTop:14}}>
+                      <Divider/>
+                      <SectionTitle>Ingredients</SectionTitle>
+                      <textarea value={(rec.ingredients||[]).join(", ")} onChange={e=>dispatch({type:"SET_RECIPE_INGREDIENTS",meal,value:e.target.value.split(",").map(x=>x.trim()).filter(Boolean)})} placeholder="Comma-separated ingredients…" style={{...inputStyle,minHeight:60,resize:"vertical"}}/>
+                      <div style={{marginTop:10}}>
+                        <SectionTitle>Notes ({s.profile})</SectionTitle>
+                        <textarea value={rec.notes||""} onChange={e=>dispatch({type:"SET_RECIPE_NOTE",meal,value:e.target.value})} placeholder="Tips, variations, memories…" style={{...inputStyle,minHeight:50,resize:"vertical"}}/>
+                      </div>
+                      <div style={{marginTop:10}}>
+                        <SectionTitle>Ratings</SectionTitle>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                          <span style={{fontSize:12,color:T.textSoft}}>{s.profile}:</span>
+                          <StarRating value={rec.ratings[s.profile]||0} onChange={stars=>dispatch({type:"RATE_MEAL",meal,profile:s.profile,stars})}/>
+                        </div>
+                        {Object.entries(rec.ratings).filter(([p])=>p!==s.profile).map(([p,r])=>(
+                          <div key={p} style={{fontSize:12,color:T.textDim}}>{p}: <span style={{color:T.gold}}>{STAR.repeat(r)}</span></div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        )}
+
+        {s.tab==="shopping"&&(
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <SectionTitle>Shopping List</SectionTitle>
+              <button onClick={()=>dispatch({type:"GEN_SHOPPING"})} style={{background:"transparent",border:`1px solid ${T.border}`,color:T.textSoft,borderRadius:10,padding:"6px 12px",fontSize:12,fontWeight:600,cursor:"pointer"}}>↺ Refresh</button>
+            </div>
+            {s.shopping.length===0?(
+              <Card style={{textAlign:"center",padding:48}}>
+                <div style={{fontSize:32,marginBottom:10}}>🛒</div>
+                <div style={{color:T.textDim,fontSize:14}}>Generate from the Planner tab</div>
+              </Card>
+            ):(
+              <Card>
+                <div style={{fontSize:12,color:T.textDim,marginBottom:12}}>{s.shopping.filter(i=>i.checked).length} / {s.shopping.length} checked</div>
+                {s.shopping.map(item=>(
+                  <div key={item.id} onClick={()=>dispatch({type:"TOGGLE_SHOP",id:item.id})}
+                    style={{display:"flex",alignItems:"center",gap:12,padding:"13px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer"}}>
+                    <div style={{width:22,height:22,borderRadius:7,border:`1.5px solid ${item.checked?T.green:T.border}`,background:item.checked?T.green:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                      {item.checked&&<span style={{color:"#fff",fontSize:13,fontWeight:900}}>✓</span>}
+                    </div>
+                    <span style={{fontSize:14,color:item.checked?T.textDim:T.text,textDecoration:item.checked?"line-through":"none"}}>{item.name}</span>
+                  </div>
+                ))}
+              </Card>
+            )}
+          </div>
+        )}
+
+        {s.tab==="journal"&&(
+          <div>
+            <button onClick={()=>setShowJournalForm(!showJournalForm)} style={{...btnPrimary,marginBottom:14,background:showJournalForm?T.surface2:T.accent,color:showJournalForm?T.textSoft:T.bg,border:`1px solid ${T.border}`}}>
+              {showJournalForm?"Cancel":"+ New Entry"}
+            </button>
+            {showJournalForm&&(
+              <Card style={{border:`1px solid ${T.border}`,marginBottom:14}}>
+                <SectionTitle>New Entry — {s.profile}</SectionTitle>
+                <input placeholder="Meal name…" value={newJournal.meal} onChange={e=>setNewJournal({...newJournal,meal:e.target.value})} style={{...inputStyle,marginBottom:10}}/>
+                <input type="date" value={newJournal.date} onChange={e=>setNewJournal({...newJournal,date:e.target.value})} style={{...inputStyle,marginBottom:10}}/>
+                <textarea placeholder="How was it? Any memories or thoughts…" value={newJournal.note} onChange={e=>setNewJournal({...newJournal,note:e.target.value})} style={{...inputStyle,minHeight:70,resize:"vertical",marginBottom:10}}/>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+                  <span style={{fontSize:13,color:T.textSoft}}>Rating</span>
+                  <StarRating value={newJournal.rating} onChange={r=>setNewJournal({...newJournal,rating:r})}/>
+                </div>
+                <button onClick={()=>{
+                  if(!newJournal.meal.trim())return;
+                  dispatch({type:"ADD_JOURNAL",entry:{...newJournal,author:s.profile}});
+                  setNewJournal({meal:"",note:"",rating:0,date:new Date().toISOString().split("T")[0]});
+                  setShowJournalForm(false);
+                }} style={btnPrimary}>Save Entry</button>
+              </Card>
+            )}
+            {s.journal.map(entry=>(
+              <Card key={entry.id}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:15}}>{entry.meal}</div>
+                    <div style={{fontSize:12,color:T.textDim,marginTop:2}}>{entry.date} · {entry.author}</div>
+                  </div>
+                  <div style={{background:T.surface2,border:`1px solid ${T.border}`,color:T.textSoft,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:600}}>{entry.author}</div>
+                </div>
+                {entry.note&&<div style={{fontSize:13,color:T.textSoft,lineHeight:1.6,marginBottom:8}}>{entry.note}</div>}
+                <StarRating value={entry.rating} readonly size={14}/>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:T.surface,borderTop:`1px solid ${T.border}`,display:"flex",paddingTop:10,paddingBottom:"calc(10px + env(safe-area-inset-bottom, 0px))",zIndex:100}}>
+        {TABS.map(([t,icon,label])=>(
+          <button key={t} onClick={()=>dispatch({type:"SET_TAB",tab:t})} style={{flex:1,background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:4,color:s.tab===t?T.accent:T.textDim}}>
+            <span style={{fontSize:22}}>{icon}</span>
+            <span style={{fontSize:10,fontWeight:600,letterSpacing:0.3}}>{label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
